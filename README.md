@@ -1,6 +1,7 @@
 # Terraform Provider: Conductor
 
-The Conductor Provider used create resource on conductor platform
+The Conductor Provider used create resource on conductor platform.
+This is an unofficial Terraform provider for Conductor.
 See Conductor OSS reference: https://github.com/conductor-oss/conductor
 
 ## Requirements

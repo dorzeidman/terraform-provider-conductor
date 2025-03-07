@@ -1,29 +1,29 @@
 package main
 
 import (
-   "context"
-   "flag"
-   "log"
+	"context"
+	"flag"
+	"log"
 
-   "github.com/dorzeidman/conductor-terraform-provider/internal/provider"
+	"github.com/dorzeidman/conductor-terraform-provider/internal/provider"
 
-   "github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
 func main() {
-   var debug bool
+	var debug bool
 
-   flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
-   flag.Parse()
+	flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
+	flag.Parse()
 
-   opts := providerserver.ServeOpts{
-       Address: "hashicorp.com/dorzeidman/conductor",
-       Debug:   debug,
-   }
+	opts := providerserver.ServeOpts{
+		Address: "hashicorp.com/dorzeidman/conductor",
+		Debug:   debug,
+	}
 
-   err := providerserver.Serve(context.Background(), provider.New(), opts)
+	err := providerserver.Serve(context.Background(), provider.New(), opts)
 
-   if err != nil {
-       log.Fatal(err.Error())
-   }
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 }

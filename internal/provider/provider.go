@@ -37,7 +37,7 @@ func (p *ConductorProvider) Metadata(ctx context.Context, req tfprovider.Metadat
 func (p *ConductorProvider) Schema(ctx context.Context, req tfprovider.SchemaRequest, resp *tfprovider.SchemaResponse) {
 	resp.Schema = tfschema.Schema{
 		Description:         "The Conductor Provider used create resource on conductor platform",
-		MarkdownDescription: "The Conductor Provider used create resource on conductor platform\nSee Conductor OSS reference: https://github.com/conductor-oss/conductor",
+		MarkdownDescription: "The Conductor Provider used create resource on conductor platform\nThis is an unofficial Terraform provider for Conducotr\nSee Conductor OSS reference: https://github.com/conductor-oss/conductor",
 		Attributes: map[string]tfschema.Attribute{
 			"endpoint": tfschema.StringAttribute{
 				MarkdownDescription: "Endpoint of the Conductor API, e.g. - http://localhost:6251/",

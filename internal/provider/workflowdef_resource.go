@@ -252,7 +252,11 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 		return
 	}
 
-	version := currentManifestMap["version"].(float64)
+	version, versionIsFloat64 := currentManifestMap["version"].(float64)
+	if !versionIsFloat64 {
+		resp.Diagnostics.AddError("Unexpected Error. version isn't float64", "")
+		return
+	}
 
 	for _, f := range auditableFieldsToIgnore {
 		delete(currentManifestMap, f)
