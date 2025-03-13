@@ -18,7 +18,7 @@ See Conductor OSS reference: https://github.com/conductor-oss/conductor
 
 ```terraform
 provider "conductor" {
-  endpoint = "http://localhost:8080/"
+  endpoint = "http://localhost:8080/api"
 }
 ```
 
@@ -27,7 +27,7 @@ provider "conductor" {
 
 ### Required
 
-- `endpoint` (String) Endpoint of the Conductor API, e.g. - http://localhost:6251/
+- `endpoint` (String) Endpoint of the Conductor API, the endpoint should include the /api prefix. e.g. - http://localhost:6251/api
 
 ### Optional
 

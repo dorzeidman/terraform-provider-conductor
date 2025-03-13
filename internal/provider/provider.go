@@ -40,7 +40,7 @@ func (p *ConductorProvider) Schema(ctx context.Context, req tfprovider.SchemaReq
 		MarkdownDescription: "The Conductor Provider used create resource on conductor platform\nThis is an unofficial Terraform provider for Conducotr\nSee Conductor OSS reference: https://github.com/conductor-oss/conductor",
 		Attributes: map[string]tfschema.Attribute{
 			"endpoint": tfschema.StringAttribute{
-				MarkdownDescription: "Endpoint of the Conductor API, e.g. - http://localhost:6251/",
+				MarkdownDescription: "Endpoint of the Conductor API, the endpoint should include the /api prefix. e.g. - http://localhost:6251/api",
 				Required:            true,
 			},
 			"custom_headers": tfschema.MapAttribute{
@@ -64,7 +64,7 @@ func (p *ConductorProvider) Configure(ctx context.Context, req tfprovider.Config
 		return
 	}
 
-	p.client = createConductorHttpClient(data)
+	p.client = createConductorHttpClient(ctx, data)
 
 	resp.DataSourceData = p // will be usable by DataSources
 	resp.ResourceData = p   // will be usable by Resources
