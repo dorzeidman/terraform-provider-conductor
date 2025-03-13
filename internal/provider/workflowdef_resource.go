@@ -169,7 +169,7 @@ func (r *WorkflowDefResource) Create(ctx context.Context, req tfresource.CreateR
 		return
 	}
 
-	response, err := r.client.do(http.MethodPut, "api/metadata/workflow", bytes.NewBuffer(requestBytes))
+	response, err := r.client.do(ctx, http.MethodPut, "metadata/workflow", bytes.NewBuffer(requestBytes))
 
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))
@@ -219,7 +219,7 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 		return
 	}
 
-	response, err := r.client.do(http.MethodGet, fmt.Sprintf("api/metadata/workflow/%s", name), nil)
+	response, err := r.client.do(ctx, http.MethodGet, fmt.Sprintf("metadata/workflow/%s", name), nil)
 
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read workflow, got error: %s", err))
@@ -302,9 +302,9 @@ func (r *WorkflowDefResource) Delete(ctx context.Context, req tfresource.DeleteR
 
 	for version > 0 {
 
-		path := fmt.Sprintf("api/metadata/workflow/%s/%d", name, version)
+		path := fmt.Sprintf("metadata/workflow/%s/%d", name, version)
 
-		response, err := r.client.do(http.MethodDelete, path, nil)
+		response, err := r.client.do(ctx, http.MethodDelete, path, nil)
 
 		if err != nil {
 			resp.Diagnostics.AddError("Delete Error", fmt.Sprintf("Unable to delete task def, got error: %s", err))
@@ -317,7 +317,7 @@ func (r *WorkflowDefResource) Delete(ctx context.Context, req tfresource.DeleteR
 		if response.StatusCode != http.StatusOK {
 			if response.StatusCode == http.StatusInternalServerError {
 				//check if exists
-				response, err := r.client.do(http.MethodGet, path, nil)
+				response, err := r.client.do(ctx, http.MethodGet, path, nil)
 				if err == nil && response.StatusCode == http.StatusNotFound {
 					alreadyDeleted = true
 				}
@@ -376,7 +376,7 @@ func (r *WorkflowDefResource) Update(ctx context.Context, req tfresource.UpdateR
 		return
 	}
 
-	response, err := r.client.do(http.MethodPut, "api/metadata/workflow", bytes.NewBuffer(requestBytes))
+	response, err := r.client.do(ctx, http.MethodPut, "metadata/workflow", bytes.NewBuffer(requestBytes))
 
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))

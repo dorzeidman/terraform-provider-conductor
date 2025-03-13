@@ -159,7 +159,7 @@ func (r *TaskDefResource) Create(ctx context.Context, req tfresource.CreateReque
 		return
 	}
 
-	response, err := r.client.do(http.MethodPost, "api/metadata/taskdefs", bytes.NewBuffer(requestBytes))
+	response, err := r.client.do(ctx, http.MethodPost, "metadata/taskdefs", bytes.NewBuffer(requestBytes))
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))
 		return
@@ -206,9 +206,9 @@ func (r *TaskDefResource) Read(ctx context.Context, req tfresource.ReadRequest, 
 		return
 	}
 
-	path := fmt.Sprintf("api/metadata/taskdefs/%s", stateTaskType)
+	path := fmt.Sprintf("metadata/taskdefs/%s", stateTaskType)
 
-	response, err := r.client.do(http.MethodGet, path, nil)
+	response, err := r.client.do(ctx, http.MethodGet, path, nil)
 
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read task, got error: %s", err))
@@ -281,9 +281,9 @@ func (r *TaskDefResource) Delete(ctx context.Context, req tfresource.DeleteReque
 		return
 	}
 
-	path := fmt.Sprintf("api/metadata/taskdefs/%s", taskType)
+	path := fmt.Sprintf("metadata/taskdefs/%s", taskType)
 
-	response, err := r.client.do(http.MethodDelete, path, nil)
+	response, err := r.client.do(ctx, http.MethodDelete, path, nil)
 	if err != nil {
 		resp.Diagnostics.AddError("Delete Error", fmt.Sprintf("Unable to delete task def, got error: %s", err))
 		return
@@ -295,7 +295,7 @@ func (r *TaskDefResource) Delete(ctx context.Context, req tfresource.DeleteReque
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusInternalServerError {
 			//check if exists
-			response, err := r.client.do(http.MethodGet, path, nil)
+			response, err := r.client.do(ctx, http.MethodGet, path, nil)
 			if err == nil && response.StatusCode == http.StatusNotFound {
 				alreadyDeleted = true
 			}
@@ -342,7 +342,7 @@ func (r *TaskDefResource) Update(ctx context.Context, req tfresource.UpdateReque
 		return
 	}
 
-	response, err := r.client.do(http.MethodPut, "api/metadata/taskdefs", bytes.NewBuffer(putBodyBytes))
+	response, err := r.client.do(ctx, http.MethodPut, "metadata/taskdefs", bytes.NewBuffer(putBodyBytes))
 
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))
