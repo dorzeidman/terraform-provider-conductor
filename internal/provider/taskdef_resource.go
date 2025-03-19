@@ -18,7 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
-var auditableFieldsToIgnore = [5]string{"createTime", "updateTime", "createdBy", "updatedBy", "version"}
+var auditableFieldsToIgnore = [4]string{"createTime", "updateTime", "createdBy", "updatedBy"}
 
 var defaultTaskDefValues = map[string]interface{}{
 	"backoffScaleFactor":          float64(1),
@@ -295,9 +295,12 @@ func (r *TaskDefResource) Delete(ctx context.Context, req tfresource.DeleteReque
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusInternalServerError {
 			//check if exists
-			response, err := r.client.do(ctx, http.MethodGet, path, nil)
-			if err == nil && response.StatusCode == http.StatusNotFound {
+			internalGetResponse, err := r.client.do(ctx, http.MethodGet, path, nil)
+			if err == nil && internalGetResponse.StatusCode == http.StatusNotFound {
 				alreadyDeleted = true
+			}
+			if err == nil {
+				defer internalGetResponse.Body.Close()
 			}
 		}
 
