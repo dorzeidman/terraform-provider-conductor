@@ -4,11 +4,27 @@ page_title: "conductor_workflowdef Resource - conductor"
 subcategory: ""
 description: |-
   Conductor Workflow Definition
+  Versioning
+  Workflow definition has a "version" field for supporting of keep old version / execution specific version.
+  On delete all the workflow definition versions will be deleted.
+  The provider support two types of versions modes.
+  Auto Version Mode
+  If you remove the "version" field from the manifest, then on creation the version will be equal to 1. Every update will increment the version by 1.
+  Manual Version Mode
+  If the manifest has a "version" field, it will be used as part of creation and updating. updates will fail if the version will be decreased.
 ---
 
 # conductor_workflowdef (Resource)
 
 Conductor Workflow Definition
+## Versioning
+Workflow definition has a "version" field for supporting of keep old version / execution specific version.
+On delete all the workflow definition versions will be deleted.
+The provider support two types of versions modes.
+### Auto Version Mode
+If you remove the "version" field from the manifest, then on creation the version will be equal to 1. Every update will increment the version by 1.
+### Manual Version Mode
+If the manifest has a "version" field, it will be used as part of creation and updating. updates will fail if the version will be decreased.
 
 ## Example Usage
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"reflect"
 
@@ -54,8 +55,18 @@ func (r *WorkflowDefResource) Metadata(ctx context.Context, req tfresource.Metad
 
 func (r *WorkflowDefResource) Schema(ctx context.Context, req tfresource.SchemaRequest, resp *tfresource.SchemaResponse) {
 	resp.Schema = tfschema.Schema{
-		Description:         "Conductor Workflow Definition",
-		MarkdownDescription: "Conductor Workflow Definition",
+		Description: "Conductor Workflow Definition",
+		MarkdownDescription: `
+Conductor Workflow Definition
+## Versioning
+Workflow definition has a "version" field for supporting of keep old version / execution specific version.
+On delete all the workflow definition versions will be deleted.
+The provider support two types of versions modes.
+### Auto Version Mode
+If you remove the "version" field from the manifest, then on creation the version will be equal to 1. Every update will increment the version by 1.
+### Manual Version Mode
+If the manifest has a "version" field, it will be used as part of creation and updating. updates will fail if the version will be decreased.
+		`,
 		Attributes: map[string]tfschema.Attribute{
 			"manifest": tfschema.StringAttribute{
 				Description: "The JSON Manifest for the workflow definition",
@@ -63,7 +74,6 @@ func (r *WorkflowDefResource) Schema(ctx context.Context, req tfresource.SchemaR
 				CustomType:  jsontypes.NormalizedType{},
 				PlanModifiers: []planmodifier.String{
 					nameChangedModifier{},
-					//workflowdDefNotChangedModifier{},
 				},
 				Validators: []validator.String{
 					manifestNameValidator{},
@@ -71,9 +81,6 @@ func (r *WorkflowDefResource) Schema(ctx context.Context, req tfresource.SchemaR
 			},
 			"version": tfschema.Int32Attribute{
 				Computed: true,
-				// PlanModifiers: []planmodifier.Int32{
-				// 	workflowdDefVersionModifier{},
-				// },
 			},
 		},
 	}
@@ -155,47 +162,55 @@ func (r *WorkflowDefResource) Create(ctx context.Context, req tfresource.CreateR
 		return
 	}
 
-	//remove fields
-	for _, f := range auditableFieldsToIgnore {
-		delete(manifestMap, f)
-	}
-
-	var requestBody [1]map[string]interface{}
-	requestBody[0] = manifestMap
-
-	requestBytes, err := json.Marshal(requestBody)
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid Manifest", fmt.Sprintf("Manifest Marshal error: %s", err))
+	createVersion, shoudCreate := checkExistingVersionBeforeCreate(ctx, r.client, manifestMap, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	response, err := r.client.do(ctx, http.MethodPut, "metadata/workflow", bytes.NewBuffer(requestBytes))
+	if shoudCreate {
+		//remove fields
+		for _, f := range auditableFieldsToIgnore {
+			delete(manifestMap, f)
+		}
+		manifestMap["version"] = createVersion
 
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))
-		return
-	}
-	defer response.Body.Close()
+		var requestBody [1]map[string]interface{}
+		requestBody[0] = manifestMap
 
-	body, bodyErr := io.ReadAll(response.Body)
-
-	if response.StatusCode != http.StatusOK {
-		if bodyErr != nil {
-			resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Failed to read response body: %s",
-				response.Status, bodyErr))
+		requestBytes, err := json.Marshal(requestBody)
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid Manifest", fmt.Sprintf("Manifest Marshal error: %s", err))
 			return
 		}
 
-		resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Body: %s", response.Status, string(body)))
-		return
+		response, err := r.client.do(ctx, http.MethodPut, "metadata/workflow", bytes.NewBuffer(requestBytes))
+
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Error sending request: %s", err))
+			return
+		}
+		defer response.Body.Close()
+
+		body, bodyErr := io.ReadAll(response.Body)
+
+		if response.StatusCode != http.StatusOK {
+			if bodyErr != nil {
+				resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Failed to read response body: %s",
+					response.Status, bodyErr))
+				return
+			}
+
+			resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Body: %s", response.Status, string(body)))
+			return
+		}
+
+		if bodyErr != nil {
+			resp.Diagnostics.AddError("Status was OK but failed to Read Response Body", fmt.Sprintf("Could not read response body: %s", err))
+			return
+		}
 	}
 
-	if bodyErr != nil {
-		resp.Diagnostics.AddError("Status was OK but failed to Read Response Body", fmt.Sprintf("Could not read response body: %s", err))
-		return
-	}
-
-	state.Version = tftypes.Int32Value(1)
+	state.Version = tftypes.Int32Value(createVersion)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -216,6 +231,12 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 
 	name := getWorkflowNameFromManifest(stateManifestMap, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	_, stateVersionExists, err := getWorkflowVersionOptionalFromManifest(stateManifestMap)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to get version from manifest plan", fmt.Sprintf("Get Version error: %s", err))
 		return
 	}
 
@@ -252,9 +273,10 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 		return
 	}
 
-	version, versionIsFloat64 := currentManifestMap["version"].(float64)
-	if !versionIsFloat64 {
-		resp.Diagnostics.AddError("Unexpected Error. version isn't float64", "")
+	version, err := getWorkflowVersionFromManifest(currentManifestMap)
+
+	if err != nil {
+		resp.Diagnostics.AddError("Unexpected Error. failed ot extract version from current manifest", err.Error())
 		return
 	}
 
@@ -266,6 +288,10 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 		}
 	}
 
+	if !stateVersionExists {
+		delete(currentManifestMap, "version")
+	}
+
 	workflowDefCleanupAndMerge(ctx, currentManifestMap, stateManifestMap)
 
 	updatedStateBytes, err := json.Marshal(stateManifestMap)
@@ -274,7 +300,7 @@ func (r *WorkflowDefResource) Read(ctx context.Context, req tfresource.ReadReque
 		return
 	}
 
-	state.Version = tftypes.Int32Value(int32(version))
+	state.Version = tftypes.Int32Value(version)
 	state.Manifest = jsontypes.NewNormalizedValue(string(updatedStateBytes))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -298,11 +324,25 @@ func (r *WorkflowDefResource) Delete(ctx context.Context, req tfresource.DeleteR
 		return
 	}
 
-	version := state.Version.ValueInt32()
+	var currentVersion int32
 
-	for version > 0 {
+	for {
+		nextVersion, versionExists := getLatestVersion(ctx, r.client, name, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 
-		path := fmt.Sprintf("metadata/workflow/%s/%d", name, version)
+		if !versionExists {
+			break
+		}
+
+		if currentVersion > 0 && currentVersion == nextVersion {
+			resp.Diagnostics.AddError("Delete failed, try to delete the same version twice", "")
+			return
+		}
+		currentVersion = nextVersion
+
+		path := fmt.Sprintf("metadata/workflow/%s/%d", name, currentVersion)
 
 		response, err := r.client.do(ctx, http.MethodDelete, path, nil)
 
@@ -312,31 +352,20 @@ func (r *WorkflowDefResource) Delete(ctx context.Context, req tfresource.DeleteR
 		}
 
 		defer response.Body.Close()
-		alreadyDeleted := false
 
 		if response.StatusCode != http.StatusOK {
-			if response.StatusCode == http.StatusInternalServerError {
-				//check if exists
-				response, err := r.client.do(ctx, http.MethodGet, path, nil)
-				if err == nil && response.StatusCode == http.StatusNotFound {
-					alreadyDeleted = true
-				}
+
+			bodyBytes, err := io.ReadAll(response.Body)
+			var bodyStr string
+			if err == nil {
+				bodyStr = string(bodyBytes)
+			} else {
+				bodyStr = fmt.Sprintf("Read All Body Error: %s", err)
 			}
 
-			if !alreadyDeleted {
-				bodyBytes, err := io.ReadAll(response.Body)
-				var bodyStr string
-				if err == nil {
-					bodyStr = string(bodyBytes)
-				} else {
-					bodyStr = fmt.Sprintf("Read All Body Error: %s", err)
-				}
-
-				resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Body: %s", response.Status, bodyStr))
-				return
-			}
+			resp.Diagnostics.AddError("HTTP Error", fmt.Sprintf("Received non-OK HTTP status: %s. Body: %s", response.Status, bodyStr))
+			return
 		}
-		version--
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -349,9 +378,6 @@ func (r *WorkflowDefResource) Update(ctx context.Context, req tfresource.UpdateR
 		return
 	}
 
-	var stateVersion tftypes.Int32
-	req.State.GetAttribute(ctx, path.Root("version"), &stateVersion)
-
 	var manifestMap map[string]interface{}
 	resp.Diagnostics.Append(state.Manifest.Unmarshal(&manifestMap)...)
 	if resp.Diagnostics.HasError() {
@@ -363,9 +389,28 @@ func (r *WorkflowDefResource) Update(ctx context.Context, req tfresource.UpdateR
 		delete(manifestMap, f)
 	}
 
-	newVersion := stateVersion.ValueInt32() + 1
+	planVersion, planVersionExists, err := getWorkflowVersionOptionalFromManifest(manifestMap)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to get version from manifest plan", fmt.Sprintf("Get Version error: %s", err))
+		return
+	}
 
-	manifestMap["version"] = newVersion
+	var newVersion int32
+	if planVersionExists {
+		verifyValidVersionForUpdate(ctx, r.client, manifestMap, planVersion, &resp.Diagnostics)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		newVersion = planVersion
+	} else {
+
+		var stateVersion tftypes.Int32
+		req.State.GetAttribute(ctx, path.Root("version"), &stateVersion)
+
+		newVersion = stateVersion.ValueInt32() + 1
+		manifestMap["version"] = newVersion
+	}
 
 	var requestBody [1]map[string]interface{}
 	requestBody[0] = manifestMap
@@ -435,6 +480,42 @@ func getWorkflowNameFromManifest(manifestMap map[string]interface{}, diagnostics
 	return taskType
 }
 
+func getWorkflowVersionOptionalFromManifest(manifestMap map[string]interface{}) (int32, bool, error) {
+	versionVal, ok := manifestMap["version"]
+	if !ok {
+		return 0, false, nil
+	}
+
+	versionFloat64, ok := versionVal.(float64)
+	if !ok {
+		return 0, false, fmt.Errorf("'version' parameter must be int")
+	}
+
+	if versionFloat64 != math.Floor(versionFloat64) {
+		return 0, false, fmt.Errorf("'version' parameter must be int")
+	}
+
+	versionInt := int32(versionFloat64)
+	if versionInt < 1 {
+		return 0, false, fmt.Errorf("'version' is smaller than 1")
+	}
+
+	return versionInt, true, nil
+}
+
+func getWorkflowVersionFromManifest(manifestMap map[string]interface{}) (int32, error) {
+	version, versionExists, err := getWorkflowVersionOptionalFromManifest(manifestMap)
+	if err != nil {
+		return 0, err
+	}
+
+	if !versionExists {
+		return 0, fmt.Errorf("version not found")
+	}
+
+	return version, nil
+}
+
 func workflowDefCleanupAndMerge(ctx context.Context, currentManifestMap map[string]interface{}, stateManifestMap map[string]interface{}) {
 	//1. Cleanup current
 	workflowDefCleanup(ctx, currentManifestMap)
@@ -444,6 +525,10 @@ func workflowDefCleanupAndMerge(ctx context.Context, currentManifestMap map[stri
 }
 
 func workflowDefCleanup(ctx context.Context, currentManifestMap map[string]interface{}) {
+	for _, f := range auditableFieldsToIgnore {
+		delete(currentManifestMap, f)
+	}
+
 	cleanupManifestDefaults(ctx, currentManifestMap, defaultWorkflowDefValues)
 
 	//tasks
@@ -517,4 +602,172 @@ func workflowDefMerge(ctx context.Context, currentManifestMap map[string]interfa
 
 		mergeManifestMaps(ctx, currentTask, stateTask)
 	}
+}
+
+func checkExistingVersionBeforeCreate(ctx context.Context, client *conductorHttpClient, planMap map[string]interface{}, diagnostics *diag.Diagnostics) (int32, bool) {
+	name := getWorkflowNameFromManifest(planMap, diagnostics)
+	if diagnostics.HasError() {
+		return 0, false
+	}
+
+	version, versionExists, err := getWorkflowVersionOptionalFromManifest(planMap)
+	tflog.Debug(ctx, fmt.Sprintf("Version Found: %t, Version: %d", versionExists, version))
+	if err != nil {
+		diagnostics.AddError(fmt.Sprintf("Manifest get version err: %s", err), "")
+		return 0, false
+	}
+
+	latestPath := fmt.Sprintf("metadata/workflow/%s", name)
+
+	response, err := client.do(ctx, http.MethodGet, latestPath, nil)
+
+	if err != nil {
+		diagnostics.AddError("Failed to get Manifest", fmt.Sprintf("Manifest get err: %s", err))
+		return 0, false
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusNotFound {
+		if versionExists {
+			return version, true
+		}
+		return 1, true
+	}
+
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		diagnostics.AddError("Error reading response body", fmt.Sprintf("Status Code: %s, Error: %s", response.Status, err))
+		return 0, false
+	}
+
+	if response.StatusCode != http.StatusOK {
+		diagnostics.AddError("HTTP Get Error", fmt.Sprintf("Received bad HTTP status: %s. Body: %s", response.Status, string(bodyBytes)))
+		return 0, false
+	}
+
+	var currentManifestMap map[string]interface{}
+
+	err = json.Unmarshal(bodyBytes, &currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Current Manifest JSON Parse error", fmt.Sprintf("Manifest must be a valid json: %s", err))
+		return 0, false
+	}
+
+	currentVersion, err := getWorkflowVersionFromManifest(currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Invalid Current Manifest", fmt.Sprintf("Manifest get version err: %s", err))
+		return 0, false
+	}
+
+	if versionExists {
+		if version < currentVersion {
+			diagnostics.AddError("Found an existing workflow definition with a larger version", "")
+			return 0, false
+		}
+
+		return version, true
+	}
+
+	//Auto Version
+	workflowDefCleanup(ctx, planMap)
+	delete(currentManifestMap, "version")
+	workflowDefCleanup(ctx, currentManifestMap)
+
+	if reflect.DeepEqual(planMap, currentManifestMap) {
+		tflog.Debug(ctx, "Will not create workflow def because it already exists with the same manifest + version")
+		//Not changes found, so do nothing
+		return currentVersion, false
+	}
+
+	return currentVersion + 1, true
+}
+
+func verifyValidVersionForUpdate(ctx context.Context, client *conductorHttpClient, planMap map[string]interface{}, planVersion int32, diagnostics *diag.Diagnostics) {
+	name := getWorkflowNameFromManifest(planMap, diagnostics)
+	if diagnostics.HasError() {
+		return
+	}
+
+	latestPath := fmt.Sprintf("metadata/workflow/%s", name)
+
+	response, err := client.do(ctx, http.MethodGet, latestPath, nil)
+	if err != nil {
+		diagnostics.AddError("Failed to get Manifest", fmt.Sprintf("Manifest get err: %s", err))
+	}
+
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusNotFound {
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		diagnostics.AddError("Error reading response body", fmt.Sprintf("Status Code: %s, Error: %s", response.Status, err))
+	}
+
+	if response.StatusCode != http.StatusOK {
+		diagnostics.AddError("HTTP Get Error", fmt.Sprintf("Received bad HTTP status: %s. Body: %s", response.Status, string(bodyBytes)))
+		return
+	}
+
+	var currentManifestMap map[string]interface{}
+
+	err = json.Unmarshal(bodyBytes, &currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Current Manifest JSON Parse error", fmt.Sprintf("Manifest must be a valid json: %s", err))
+		return
+	}
+
+	currentVersion, err := getWorkflowVersionFromManifest(currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Invalid Current Manifest", fmt.Sprintf("Manifest get version err: %s", err))
+		return
+	}
+
+	if planVersion < currentVersion {
+		diagnostics.AddError("Found an existing workflow definition with a larger version", "")
+	}
+}
+
+func getLatestVersion(ctx context.Context, client *conductorHttpClient, name string, diagnostics *diag.Diagnostics) (int32, bool) {
+	latestPath := fmt.Sprintf("metadata/workflow/%s", name)
+
+	response, err := client.do(ctx, http.MethodGet, latestPath, nil)
+	if err != nil {
+		diagnostics.AddError("Failed to get Manifest", fmt.Sprintf("Manifest get err: %s", err))
+		return 0, false
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusNotFound {
+		return 0, false
+	}
+
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		diagnostics.AddError("Error reading response body", fmt.Sprintf("Status Code: %s, Error: %s", response.Status, err))
+		return 0, false
+	}
+
+	if response.StatusCode != http.StatusOK {
+		diagnostics.AddError("HTTP Get Error", fmt.Sprintf("Received bad HTTP status: %s. Body: %s", response.Status, string(bodyBytes)))
+		return 0, false
+	}
+
+	var currentManifestMap map[string]interface{}
+
+	err = json.Unmarshal(bodyBytes, &currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Current Manifest JSON Parse error", fmt.Sprintf("Manifest must be a valid json: %s", err))
+		return 0, false
+	}
+
+	currentVersion, err := getWorkflowVersionFromManifest(currentManifestMap)
+	if err != nil {
+		diagnostics.AddError("Invalid Current Manifest", fmt.Sprintf("Manifest get version err: %s", err))
+		return 0, false
+	}
+
+	return currentVersion, true
 }
