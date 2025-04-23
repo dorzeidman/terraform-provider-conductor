@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '43 20 * * *'
 
+permissions:
+  issues: write
+  pull-requests: write
+  discussions: write
+
 jobs:
   lock:
     runs-on: ubuntu-latest
